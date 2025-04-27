@@ -138,3 +138,76 @@ if submitted:
 
     st.divider()
     st.subheader("🎯 穿搭推荐结果")
+
+    st.markdown(f"推算体感温度为：**{feels_like_real:.1f}℃**")
+
+    up_layers, down_desc = decide_layers(feels_like_real)
+
+    # 上身推荐
+    st.markdown("#### 【上身搭配】")
+    for layer in up_layers:
+        if layer == "打底短袖":
+            pool = TOP_POOLS.get("打底短袖", [])
+            label = "打底"
+        elif layer == "打底长袖薄":
+            pool = TOP_POOLS.get("打底长袖薄", [])
+            label = "打底"
+        elif layer == "打底长袖厚":
+            pool = TOP_POOLS.get("打底长袖厚", [])
+            label = "打底"
+        elif layer == "中层薄":
+            pool = TOP_POOLS.get("中层薄", [])
+            label = "中层"
+        elif layer == "中层厚":
+            pool = TOP_POOLS.get("中层厚", [])
+            label = "中层"
+        elif layer == "外套薄":
+            pool = TOP_POOLS.get("外套薄", [])
+            label = "外套"
+        elif layer == "外套厚":
+            pool = TOP_POOLS.get("外套厚", [])
+            label = "外套"
+        elif layer == "额外保暖层":
+            pool = TOP_POOLS.get("额外保暖层", [])
+            label = "额外保暖层"
+        else:
+            continue
+
+        if pool:
+            main, backups = select_main_backup(pool)
+            st.markdown(f"- **{label}**：{main} （可替代：{', '.join(backups)})")
+
+    # 下身推荐
+    st.markdown("#### 【下身搭配】")
+    bottoms = BOTTOM_POOLS_F if gender == "女性" else BOTTOM_POOLS_M
+    if "短" in down_desc and "薄短" in bottoms:
+        main, backups = select_main_backup(bottoms["薄短"])
+        st.markdown(f"- 下装：{main} （可替代：{', '.join(backups)})")
+    if "薄长" in down_desc and "薄长" in bottoms:
+        main, backups = select_main_backup(bottoms["薄长"])
+        st.markdown(f"- 下装：{main} （可替代：{', '.join(backups)})")
+    if "厚长" in down_desc and "厚长" in bottoms:
+        main, backups = select_main_backup(bottoms["厚长"])
+        st.markdown(f"- 下装：{main} （可替代：{', '.join(backups)})")
+    if "加层" in down_desc and "加层" in bottoms:
+        main, backups = select_main_backup(bottoms["加层"])
+        st.markdown(f"- 加层：{main} （可替代：{', '.join(backups)})")
+
+    # 鞋子推荐
+    st.markdown("#### 【鞋子推荐】")
+    if weather in ("下雨", "下雪"):
+        main, backups = select_main_backup(SHOES_POOLS["雨雪"])
+    elif feels_like_real <= 5:
+        main, backups = select_main_backup(SHOES_POOLS["保暖"])
+    else:
+        main, backups = select_main_backup(SHOES_POOLS["日常"])
+    st.markdown(f"- 鞋子：{main} （可替代：{', '.join(backups)})")
+
+    # 小提醒
+    st.markdown("#### 【附加提醒】")
+    if weather in ("下雨", "下雪"):
+        st.markdown("- 有降水，记得带伞并穿防水鞋。")
+    if feels_like_real <= 8:
+        st.markdown("- 气温较低，建议增加围巾、帽子、手套等装备。")
+    if wind >= 8:
+        st.markdown("- 风较大，可选择防风外套。")
