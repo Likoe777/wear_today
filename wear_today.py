@@ -55,21 +55,33 @@ SHOES_POOLS = {
 def rand_choices(pool, count=2):
     return random.sample(pool, min(count, len(pool)))
 
+# 新版：真实穿搭体验的 decide_layers
 def decide_layers(feel_temp):
-    if feel_temp >= 27:
-        return ["打底短袖"], "薄短"
-    elif 23 <= feel_temp < 27:
-        return ["打底短袖或打底长袖薄"], "薄长"
-    elif 19 <= feel_temp < 23:
-        return ["打底长袖薄", "外套薄"], "薄长"
-    elif 15 <= feel_temp < 19:
-        return ["打底长袖薄", "外套薄"], "薄长"
-    elif 10 <= feel_temp < 15:
-        return ["打底长袖厚", "外套薄"], "厚长"
-    elif 6 <= feel_temp < 10:
-        return ["打底长袖厚", "中层厚", "外套厚"], "厚长+加层"
+    if feel_temp >= 28:
+        return [["打底短袖"]], "薄短"
+    elif 24 <= feel_temp < 28:
+        return [["打底短袖"]], "薄长"
+    elif 20 <= feel_temp < 24:
+        return [["打底短袖", "外套薄"], ["打底长袖薄"]], "薄长"
+    elif 16 <= feel_temp < 20:
+        return [["打底长袖薄", "外套薄"]], "薄长"
+    elif 12 <= feel_temp < 16:
+        return [
+            ["打底长袖厚", "外套薄"],
+            ["打底长袖薄", "外套厚"],
+            ["打底长袖薄", "中层薄", "外套薄"]
+        ], "厚长"
+    elif 9 <= feel_temp < 12:
+        return [
+            ["打底长袖厚", "中层薄", "外套厚"],
+            ["打底长袖厚", "中层厚", "外套薄"]
+        ], "厚长"
+    elif 6 <= feel_temp < 9:
+        return [["打底长袖厚", "中层厚", "外套厚"]], "厚长+加层"
+    elif 3 <= feel_temp < 6:
+        return [["打底长袖厚", "中层厚", "外套厚", "额外保暖层"]], "厚长+加层"
     else:
-        return ["打底长袖厚", "中层厚", "外套厚", "额外保暖层"], "厚长+加层"
+        return [["打底长袖厚", "中层厚", "外套厚", "额外保暖层"]], "厚长+加层"
 
 def select_main_backup(pool):
     main = random.choice(pool)
@@ -106,25 +118,23 @@ if submitted:
     bias_map = {"正常": 0, "怕冷（体感-1℃）": -1, "怕热（体感+1℃）": 1}
     bias = bias_map.get(bias_choice, 0)
 
-    # ✨异常检测
     error_messages = []
     if high_temp > 60:
-        error_messages.append("暂不支持为炼丹炉内的居民搭配穿搭。🔥")
+        error_messages.append("暂不支持为炼丹炉内的居民量身定制穿搭。🔥")
     if low_temp < -50:
         error_messages.append("暂不支持为南极帝企鹅量身定制穿搭。🐧")
     if precip > 500:
         error_messages.append("暂不支持为海洋生物量身定制穿搭。🐋")
     if wind > 50:
-        error_messages.append("暂不支持为龙卷风猎人配备战斗服。🌪️")
+        error_messages.append("暂不支持为龙卷风猎人量身定制战斗服。🌪️")
     if high_temp < low_temp:
-        error_messages.append("你最高温度比最低温度还低？地球的物理法则哭了！🌏")
+        error_messages.append("暂不支持为最高温度比最低温度的星球居民量身定制穿搭。🌏")
 
     if error_messages:
         for msg in error_messages:
             st.error(msg)
         st.stop()
 
-    # --- 推算体感温度
     if feels_like == 0.0:
         feels_like_real = (high_temp + low_temp) / 2
         if weather in ("下雨", "下雪"):
@@ -141,23 +151,17 @@ if submitted:
 
     st.markdown(f"推算体感温度为：**{feels_like_real:.1f}℃**")
 
-    up_layers, down_desc = decide_layers(feels_like_real)
+    up_combinations, down_desc = decide_layers(feels_like_real)
 
-    # 上身推荐
+    # 上身推荐（支持多组搭配）
     st.markdown("#### 👕 上身搭配")
-    for layer in up_layers:
-        if "或" in layer:
-            options = layer.split("或")
-            for idx, single_layer in enumerate(options, 1):
-                pool = TOP_POOLS.get(single_layer, [])
-                if pool:
-                    main, backups = select_main_backup(pool)
-                    st.markdown(f"- **{single_layer}（可选{idx}）**：{main} （可替代：{', '.join(backups)})")
-        else:
-            pool = TOP_POOLS.get(layer, [])
+    for idx, combo in enumerate(up_combinations, 1):
+        st.markdown(f"**方案 {idx}：**")
+        for item in combo:
+            pool = TOP_POOLS.get(item, [])
             if pool:
                 main, backups = select_main_backup(pool)
-                st.markdown(f"- **{layer}**：{main} （可替代：{', '.join(backups)})")
+                st.markdown(f"- {item}：{main} （可替代：{', '.join(backups)})")
 
     # 下身推荐
     st.markdown("#### 👖 下身搭配")
@@ -193,3 +197,4 @@ if submitted:
         st.markdown("- 气温较低，建议增加围巾、帽子、手套等装备。")
     if wind >= 8:
         st.markdown("- 风较大，可选择防风外套。")
+
