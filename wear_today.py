@@ -143,24 +143,21 @@ if submitted:
 
     up_layers, down_desc = decide_layers(feels_like_real)
 
-    # ✨新增处理：把 "打底短袖或打底长袖薄" 拆开随机选
-    new_up_layers = []
-    for layer in up_layers:
-        if "或" in layer:
-            options = layer.split("或")
-            new_up_layers.append(random.choice(options))
-        else:
-            new_up_layers.append(layer)
-    up_layers = new_up_layers
-
     # 上身推荐
     st.markdown("#### 👕 上身搭配")
     for layer in up_layers:
-        pool = TOP_POOLS.get(layer, [])
-        label = layer
-        if pool:
-            main, backups = select_main_backup(pool)
-            st.markdown(f"- **{label}**：{main} （可替代：{', '.join(backups)})")
+        if "或" in layer:
+            options = layer.split("或")
+            for idx, single_layer in enumerate(options, 1):
+                pool = TOP_POOLS.get(single_layer, [])
+                if pool:
+                    main, backups = select_main_backup(pool)
+                    st.markdown(f"- **{single_layer}（可选{idx}）**：{main} （可替代：{', '.join(backups)})")
+        else:
+            pool = TOP_POOLS.get(layer, [])
+            if pool:
+                main, backups = select_main_backup(pool)
+                st.markdown(f"- **{layer}**：{main} （可替代：{', '.join(backups)})")
 
     # 下身推荐
     st.markdown("#### 👖 下身搭配")
