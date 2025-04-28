@@ -1,200 +1,128 @@
 import streamlit as st
 import random
+import itertools
 
-# ---------------- 定义选项 -----------------
-STYLE_OPTIONS = {
-    "通勤": "通勤",
-    "休闲": "休闲",
-    "运动": "运动",
-    "学院": "学院",
-    "中性基础": "中性基础"
-}
+"""
+👕 今天穿什么呢 - 权重算法版
+--------------------------------------------------
+• 单品权重 0.5 步进
+• 温度 → 上/下目标权重
+• 体感偏好：正常 / 怕冷(+1,+0.5) / 怕热(-1,-0.5)
+• 每次输出两套（严格 + 微调）或（常规 + 加衣/减衣）
+• 误差 ≤ ±0.5
+"""
 
-WEATHER_OPTIONS = {
-    "晴天": "晴天",
-    "多云": "多云",
-    "阴天": "阴天",
-    "下雨": "下雨",
-    "下雪": "下雪",
-    "雾": "雾",
-    "大风": "大风"
-}
-
+# ---------- 单品池 & 权重 ----------
 TOP_POOLS = {
-    "打底短袖": ["基础短袖T恤", "运动速干短袖", "Polo短袖"],
-    "打底长袖薄": ["基础长袖T恤", "运动速干长袖", "薄款长袖衬衫"],
-    "打底长袖厚": ["加绒长袖T恤", "厚卫衣", "羊毛打底衫"],
-    "中层薄": ["薄卫衣", "针织开衫", "薄毛衣"],
-    "中层厚": ["抓绒卫衣", "厚毛衣", "加绒衬衫"],
-    "外套薄": ["轻便风衣", "牛仔夹克", "西装外套（薄）", "防风夹克"],
-    "外套厚": ["羽绒服", "棉服", "羊羔毛夹克", "大衣"],
-    "额外保暖层": ["羽绒背心", "加绒背心", "厚毛衣马甲"]
+    "打底短袖": (1.0, ["基础短袖T恤", "运动速干短袖", "Polo短袖"]),
+    "打底长袖薄": (1.5, ["基础长袖T恤", "薄衬衫", "薄针织衫"]),
+    "打底长袖厚": (2.5, ["加绒长袖T", "厚卫衣", "羊毛打底衫"]),
+    "中层薄": (2.0, ["薄卫衣", "薄毛衣", "针织开衫"]),
+    "中层厚": (3.0, ["厚毛衣", "抓绒卫衣", "加绒衬衫"]),
+    "外套薄": (2.5, ["轻便风衣", "牛仔夹克", "薄西装外套", "防风夹克"]),
+    "外套厚": (4.0, ["棉服", "羊羔毛夹克", "呢大衣"]),
+    "羽绒服": (5.0, ["中长羽绒服"]),
+    "额外保暖层": (2.5, ["羽绒背心", "加绒背心", "厚毛衣马甲"]),
 }
 
 BOTTOM_POOLS_M = {
-    "薄短": ["休闲短裤", "运动短裤"],
-    "薄长": ["轻薄牛仔裤", "休闲长裤", "运动长裤"],
-    "厚长": ["加绒牛仔裤", "加绒休闲裤", "加绒运动裤"],
-    "加层": ["秋裤", "加绒打底裤"]
+    "薄短": (1.0, ["短裤"]),
+    "薄长": (1.5, ["轻薄牛仔裤", "休闲长裤", "阔腿裤", "薄西裤"]),
+    "厚长": (2.5, ["加厚牛仔裤", "加厚休闲裤", "加厚运动裤", "加厚西裤"]),
+    "加层": (1.5, ["秋裤", "加绒打底裤"]),
 }
 
 BOTTOM_POOLS_F = {
-    "薄短": ["休闲短裤", "运动短裤", "短裙"],
-    "薄长": ["轻薄牛仔裤", "阔腿裤", "休闲长裤", "长裙"],
-    "厚长": ["加绒牛仔裤", "加绒休闲裤", "加绒运动裤"],
-    "加层": ["秋裤", "加绒打底裤", "保暖腿袜"]
+    "薄短": (1.0, ["短裤", "短裙"]),
+    "薄长": (1.5, ["轻薄牛仔裤", "休闲长裤", "阔腿裤", "长裙", "薄西裤"]),
+    "厚长": (2.5, ["加厚牛仔裤", "加厚休闲裤", "加厚运动裤", "加厚西裤", "厚长裙"]),
+    "加层": (1.5, ["秋裤", "加绒打底裤", "保暖腿袜"]),
 }
 
-SHOES_POOLS = {
-    "日常": ["运动鞋", "帆布鞋"],
-    "雨雪": ["防水运动鞋", "防水短靴", "雨靴"],
-    "保暖": ["加绒短靴", "雪地靴", "加绒运动鞋"]
+# ---------- 温度 → 目标权重 ----------
+TEMP_TABLE = [
+    (28, float("inf"), 1.0, 1.0),
+    (24, 28, 2.0, 1.0),
+    (20, 24, 3.0, 1.5),
+    (16, 20, 4.0, 1.5),
+    (12, 16, 5.0, 2.0),
+    (9, 12, 6.0, 2.5),
+    (6, 9, 7.0, 3.0),
+    (3, 6, 8.0, 3.5),
+    (-273, 3, 9.0, 4.0),
+]
+
+BIAS_MAP = {
+    "正常": (0.0, 0.0),
+    "怕冷": (1.0, 0.5),
+    "怕热": (-1.0, -0.5),
 }
 
-# 随机选取
-def rand_choices(pool, count=2):
-    return random.sample(pool, min(count, len(pool)))
+# ---------- 组合搜索 ----------
 
-# 更新版穿搭推荐分段
-def decide_layers(feel_temp):
-    if feel_temp >= 28:
-        return [["打底短袖"]], "薄短"
-    elif 24 <= feel_temp < 28:
-        return [["打底短袖"]], "薄长"
-    elif 20 <= feel_temp < 24:
-        return [["打底短袖", "外套薄"], ["打底长袖薄"]], "薄长"
-    elif 16 <= feel_temp < 20:
-        return [["打底长袖薄", "外套薄"]], "薄长"
-    elif 12 <= feel_temp < 16:
-        return [["打底长袖厚", "外套薄"], ["打底长袖薄", "外套厚"], ["打底长袖薄", "中层薄", "外套薄"]], "厚长"
-    elif 9 <= feel_temp < 12:
-        return [["打底长袖厚", "中层薄", "外套厚"], ["打底长袖厚", "中层厚", "外套薄"]], "厚长"
-    elif 6 <= feel_temp < 9:
-        return [["打底长袖厚", "中层厚", "外套厚"]], "厚长+加层"
-    elif 3 <= feel_temp < 6:
-        return [["打底长袖厚", "中层厚", "外套厚", "额外保暖层"]], "厚长+加层"
-    else:
-        return [["打底长袖厚", "中层厚", "外套厚", "额外保暖层"]], "厚长+加层"
+def search_combos(pool_dict, target, tolerance=0.5, max_items=4):
+    """返回贴近 target 的组合列表，元素结构 (类别, 单品名, 权重)"""
+    items = [(cat, n, w) for cat, (w, names) in pool_dict.items() for n in names]
+    best, best_diff = [], float("inf")
+    for r in range(1, max_items + 1):
+        for combo in itertools.combinations(items, r):
+            total = sum(w for _, _, w in combo)
+            diff = abs(total - target)
+            if diff <= tolerance:
+                if diff < best_diff:
+                    best, best_diff = [combo], diff
+                elif diff == best_diff:
+                    best.append(combo)
+    return best
 
-# 单层选主备
-def select_main_backup(pool):
-    main = random.choice(pool)
-    backups = rand_choices([item for item in pool if item != main])
-    return main, backups
+# ---------- Streamlit UI ----------
+st.set_page_config(page_title="今天穿什么呢 · 权重版", layout="centered")
+st.title("👕 今天穿什么呢 · 权重版")
 
-# ----------------- 页面 -----------------
-
-st.set_page_config(page_title="今天穿什么呢", layout="centered")
-
-st.title("👕 今天穿什么呢")
-
-with st.form("input_form"):
-    st.subheader("基本信息")
-    gender = st.radio("请选择性别", ["女性", "男性"])
-    high_temp = st.number_input("请输入最高温度（℃）", format="%.1f")
-    low_temp = st.number_input("请输入最低温度（℃）", format="%.1f")
-    feels_like = st.number_input("如果知道体感温度可以填（可留空）", format="%.1f")
-    weather = st.selectbox("请选择天气情况", list(WEATHER_OPTIONS.keys()))
-    precip = st.number_input("24小时预计降水量（mm，可空）", format="%.1f")
-    wind = st.number_input("平均风速（m/s，可空）", format="%.1f")
-    hum = st.number_input("湿度%（可空）", format="%.1f")
-    uv = st.number_input("紫外线指数（可空）", format="%.1f")
-
-    st.subheader("体感偏好")
-    bias_choice = st.radio("请选择体感偏好", ["正常", "怕冷（体感-1℃）", "怕热（体感+1℃）"])
-
-    st.subheader("穿搭风格")
-    styles = st.multiselect("选择你的风格（最多选3个）", list(STYLE_OPTIONS.keys()), default=["通勤", "休闲"])
-
-    submitted = st.form_submit_button("🚀 生成穿搭建议")
+with st.form("input"):
+    col1, col2 = st.columns(2)
+    with col1:
+        gender = st.radio("性别", ["女性", "男性"], horizontal=True)
+    with col2:
+        bias_choice = st.radio("体感偏好", ["正常", "怕冷", "怕热"], horizontal=True)
+    t_feel = st.number_input("体感温度 ℃", value=15.0, format="%.1f")
+    submitted = st.form_submit_button("生成穿搭建议")
 
 if submitted:
-    bias_map = {"正常": 0, "怕冷（体感-1℃）": -1, "怕热（体感+1℃）": 1}
-    bias = bias_map.get(bias_choice, 0)
+    # 1. 基准目标
+    for low, high, up_t, down_t in TEMP_TABLE:
+        if low <= t_feel < high:
+            base_up, base_down = up_t, down_t
+            break
+    # 2. 偏好调节
+    delta_up, delta_down = BIAS_MAP[bias_choice]
 
-    error_messages = []
-    if high_temp > 60:
-        error_messages.append("暂不支持为炼丹炉内的居民量身定制穿搭。🔥")
-    if low_temp < -50:
-        error_messages.append("暂不支持为南极帝企鹅量身定制穿搭。🐧")
-    if precip > 500:
-        error_messages.append("暂不支持为海洋生物量身定制穿搭。🐋")
-    if wind > 50:
-        error_messages.append("暂不支持为龙卷风猎人量身定制战斗服。🌪️")
-    if high_temp < low_temp:
-        error_messages.append("暂不支持为最高温度比最低温度的星球居民量身定制穿搭。🌏")
+    def make_plan(u_target, d_target, label):
+        top_opts = search_combos(TOP_POOLS, u_target)
+        bottom_pool = BOTTOM_POOLS_F if gender == "女性" else BOTTOM_POOLS_M
+        bot_opts = search_combos(bottom_pool, d_target)
+        if not top_opts or not bot_opts:
+            return None
+        return label, random.choice(top_opts), random.choice(bot_opts)
 
-    if error_messages:
-        for msg in error_messages:
-            st.error(msg)
-        st.stop()
+    plans = []
+    if bias_choice == "正常":
+        plans.append(make_plan(base_up, base_down, "精准匹配"))
+        plans.append(make_plan(base_up, base_down + 0.5, "微调±0.5"))
+    elif bias_choice == "怕冷":
+        plans.append(make_plan(base_up, base_down, "常规厚度"))
+        plans.append(make_plan(base_up + 1.0, base_down + 0.5, "加衣版"))
+    else:  # 怕热
+        plans.append(make_plan(base_up, base_down, "常规厚度"))
+        plans.append(make_plan(base_up - 1.0, base_down - 0.5, "减衣版"))
 
-    if feels_like == 0.0:
-        feels_like_real = (high_temp + low_temp) / 2
-        if weather in ("下雨", "下雪"):
-            feels_like_real -= (2 if precip >= 20 else 1)
-        if wind >= 8:
-            feels_like_real -= 1
-    else:
-        feels_like_real = feels_like
-
-    feels_like_real += bias
-
-    st.divider()
-    st.subheader("🎯 穿搭推荐结果")
-
-    st.markdown(f"推算体感温度为：**{feels_like_real:.1f}℃**")
-
-    up_combinations, down_desc = decide_layers(feels_like_real)
-
-    # 上身推荐
-    st.markdown("#### 👕 上身搭配")
-    if len(up_combinations) > 1:
-        for idx, combo in enumerate(up_combinations, 1):
-            st.markdown(f"**方案 {idx}：**")
-            for item in combo:
-                pool = TOP_POOLS.get(item, [])
-                if pool:
-                    main, backups = select_main_backup(pool)
-                    st.markdown(f"- {item}：{main} （可替代：{', '.join(backups)})")
-    else:
-        for item in up_combinations[0]:
-            pool = TOP_POOLS.get(item, [])
-            if pool:
-                main, backups = select_main_backup(pool)
-                st.markdown(f"- {item}：{main} （可替代：{', '.join(backups)})")
-
-    # 下身推荐
-    st.markdown("#### 👖 下身搭配")
-    bottoms = BOTTOM_POOLS_F if gender == "女性" else BOTTOM_POOLS_M
-    if "短" in down_desc and "薄短" in bottoms:
-        main, backups = select_main_backup(bottoms["薄短"])
-        st.markdown(f"- 下装：{main} （可替代：{', '.join(backups)})")
-    if "薄长" in down_desc and "薄长" in bottoms:
-        main, backups = select_main_backup(bottoms["薄长"])
-        st.markdown(f"- 下装：{main} （可替代：{', '.join(backups)})")
-    if "厚长" in down_desc and "厚长" in bottoms:
-        main, backups = select_main_backup(bottoms["厚长"])
-        st.markdown(f"- 下装：{main} （可替代：{', '.join(backups)})")
-    if "加层" in down_desc and "加层" in bottoms:
-        main, backups = select_main_backup(bottoms["加层"])
-        st.markdown(f"- 加层：{main} （可替代：{', '.join(backups)})")
-
-    # 鞋子推荐
-    st.markdown("#### 👟 鞋子推荐")
-    if weather in ("下雨", "下雪"):
-        main, backups = select_main_backup(SHOES_POOLS["雨雪"])
-    elif feels_like_real <= 5:
-        main, backups = select_main_backup(SHOES_POOLS["保暖"])
-    else:
-        main, backups = select_main_backup(SHOES_POOLS["日常"])
-    st.markdown(f"- 鞋子：{main} （可替代：{', '.join(backups)})")
-
-    # 小提醒
-    st.markdown("#### ⚡ 附加提醒")
-    if weather in ("下雨", "下雪"):
-        st.markdown("- 有降水，记得带伞并穿防水鞋。")
-    if feels_like_real <= 8:
-        st.markdown("- 气温较低，建议增加围巾、帽子、手套等装备。")
-    if wind >= 8:
-        st.markdown("- 风较大，可选择防风外套。")
+    st.header("推荐穿搭方案")
+    for plan in filter(None, plans):
+        tag, top, bot = plan
+        st.subheader(tag)
+        st.markdown("**上身：**")
+        for cat, name, w in top:
+            st.markdown(f"- {name}（{cat} · {w}）")
+        st.markdown("**下身：**")
+        for cat, name, w in bot:
+            st.markdown(f"- {name}（{cat} · {w}）")
