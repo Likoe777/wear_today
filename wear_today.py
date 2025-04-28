@@ -2,54 +2,58 @@ import streamlit as st
 import random
 import itertools
 
+# ── 必须最先调用 ────────────────────────────────────
+st.set_page_config(page_title="今天穿什么呢 · 权重版", layout="centered")
+
 """
 👕 今天穿什么呢 - 权重算法版
---------------------------------------------------
 • 单品权重 0.5 步进
-• 温度 → 上/下目标权重
+• 温度 ➜ 上/下目标权重
 • 体感偏好：正常 / 怕冷(+1,+0.5) / 怕热(-1,-0.5)
-• 每次输出两套（严格 + 微调）或（常规 + 加衣/减衣）
+• 每次输出两套（常规+加衣/减衣 / 精准+随机微调）
 • 误差 ≤ ±0.5
 """
 
-# ---------- 单品池 & 权重 ----------
+# ---------- 上身单品池 & 权重 ----------
 TOP_POOLS = {
-    "打底短袖": (1.0, ["基础短袖T恤", "运动速干短袖", "Polo短袖"]),
+    "打底短袖":   (1.0, ["基础短袖T恤", "运动速干短袖", "Polo短袖"]),
     "打底长袖薄": (1.5, ["基础长袖T恤", "薄衬衫", "薄针织衫"]),
     "打底长袖厚": (2.5, ["加绒长袖T", "厚卫衣", "羊毛打底衫"]),
-    "中层薄": (2.0, ["薄卫衣", "薄毛衣", "针织开衫"]),
-    "中层厚": (3.0, ["厚毛衣", "抓绒卫衣", "加绒衬衫"]),
-    "外套薄": (2.5, ["轻便风衣", "牛仔夹克", "薄西装外套", "防风夹克"]),
-    "外套厚": (4.0, ["棉服", "羊羔毛夹克", "呢大衣"]),
-    "羽绒服": (5.0, ["中长羽绒服"]),
-    "额外保暖层": (2.5, ["羽绒背心", "加绒背心", "厚毛衣马甲"]),
+    "中层薄":     (2.0, ["薄卫衣", "薄毛衣", "针织开衫"]),
+    "中层厚":     (3.0, ["厚毛衣", "抓绒卫衣", "加绒衬衫"]),
+    "外套薄":     (2.5, ["轻便风衣", "牛仔夹克", "薄西装外套", "防风夹克"]),
+    "外套厚":     (4.0, ["棉服", "羊羔毛夹克", "呢大衣"]),
+    "羽绒服":     (5.0, ["中长羽绒服"]),  # 与外套厚不同键 → 允许双外套
+    "额外保暖层": (2.5, ["羽绒背心", "加绒背心", "厚马甲"]),
 }
 
+# ---------- 下身单品池 & 权重 ----------
 BOTTOM_POOLS_M = {
-    "薄短": (1.0, ["短裤"]),
+    "薄短": (1.0, ["休闲短裤", "运动短裤"]),
     "薄长": (1.5, ["轻薄牛仔裤", "休闲长裤", "阔腿裤", "薄西裤"]),
-    "厚长": (2.5, ["加厚牛仔裤", "加厚休闲裤", "加厚运动裤", "加厚西裤"]),
+    "厚长": (2.5, ["加绒牛仔裤", "加绒休闲裤", "加绒运动裤", "加绒西裤"]),
     "加层": (1.5, ["秋裤", "加绒打底裤"]),
 }
 
 BOTTOM_POOLS_F = {
-    "薄短": (1.0, ["短裤", "短裙"]),
+    "薄短": (1.0, ["休闲短裤", "运动短裤", "短裙"]),
     "薄长": (1.5, ["轻薄牛仔裤", "休闲长裤", "阔腿裤", "长裙", "薄西裤"]),
-    "厚长": (2.5, ["加厚牛仔裤", "加厚休闲裤", "加厚运动裤", "加厚西裤", "厚长裙"]),
+    "厚长": (2.5, ["加绒牛仔裤", "加绒休闲裤", "加绒运动裤",
+                   "加绒西裤", "冬季长裙"]),
     "加层": (1.5, ["秋裤", "加绒打底裤", "保暖腿袜"]),
 }
 
-# ---------- 温度 → 目标权重 ----------
+# ---------- 温度 ➜ 目标权重 ----------
 TEMP_TABLE = [
-    (28, float("inf"), 1.0, 1.0),
-    (24, 28, 2.0, 1.0),
-    (20, 24, 3.0, 1.5),
-    (16, 20, 4.0, 1.5),
-    (12, 16, 5.0, 2.0),
-    (9, 12, 6.0, 2.5),
-    (6, 9, 7.0, 3.0),
-    (3, 6, 8.0, 3.5),
-    (-273, 3, 9.0, 4.0),
+    (28,  float("inf"), 1.0, 1.0),
+    (24, 28,            2.0, 1.0),
+    (20, 24,            3.0, 1.5),
+    (16, 20,            4.0, 1.5),
+    (12, 16,            5.0, 2.0),
+    (9,  12,            6.0, 2.5),
+    (6,  9,             7.0, 3.0),
+    (3,  6,             8.0, 3.5),
+    (-273, 3,           9.0, 4.0),   # ≤3℃
 ]
 
 BIAS_MAP = {
@@ -58,25 +62,31 @@ BIAS_MAP = {
     "怕热": (-1.0, -0.5),
 }
 
-# ---------- 组合搜索 ----------
+# ---------- 工具函数 ----------
+def clamp(value: float, minimum: float = 1.0) -> float:
+    """权重下限保护：最薄单品权重=1.0"""
+    return max(minimum, value)
 
-def search_combos(pool_dict, target, tolerance=0.5, max_items=4):
-    """返回贴近 target 的组合列表，元素结构 (类别, 单品名, 权重)"""
+
+def search_combos(pool_dict, target, tol=0.5, max_items=5):
+    """返回贴近 target 的组合 (cat,name,weight) ，且不重复类别"""
     items = [(cat, n, w) for cat, (w, names) in pool_dict.items() for n in names]
     best, best_diff = [], float("inf")
     for r in range(1, max_items + 1):
         for combo in itertools.combinations(items, r):
+            cats = [c for c, _, _ in combo]
+            if len(cats) != len(set(cats)):
+                continue  # 同类别重复
             total = sum(w for _, _, w in combo)
             diff = abs(total - target)
-            if diff <= tolerance:
+            if diff <= tol:
                 if diff < best_diff:
                     best, best_diff = [combo], diff
                 elif diff == best_diff:
                     best.append(combo)
     return best
 
-# ---------- Streamlit UI ----------
-st.set_page_config(page_title="今天穿什么呢 · 权重版", layout="centered")
+# ---------- UI ----------
 st.title("👕 今天穿什么呢 · 权重版")
 
 with st.form("input"):
@@ -89,40 +99,59 @@ with st.form("input"):
     submitted = st.form_submit_button("生成穿搭建议")
 
 if submitted:
-    # 1. 基准目标
-    for low, high, up_t, down_t in TEMP_TABLE:
+    # ---- 1. 查表读取目标 ----
+    for low, high, up_base, dn_base in TEMP_TABLE:
         if low <= t_feel < high:
-            base_up, base_down = up_t, down_t
             break
-    # 2. 偏好调节
-    delta_up, delta_down = BIAS_MAP[bias_choice]
+    else:
+        st.error("体感温度超出合理范围，请检查输入！")
+        st.stop()
+
+    up_delta, dn_delta = BIAS_MAP[bias_choice]
 
     def make_plan(u_target, d_target, label):
-        top_opts = search_combos(TOP_POOLS, u_target)
-        bottom_pool = BOTTOM_POOLS_F if gender == "女性" else BOTTOM_POOLS_M
-        bot_opts = search_combos(bottom_pool, d_target)
-        if not top_opts or not bot_opts:
-            return None
-        return label, random.choice(top_opts), random.choice(bot_opts)
+        tops = search_combos(TOP_POOLS, u_target)
+        bottoms = search_combos(
+            BOTTOM_POOLS_F if gender == "女性" else BOTTOM_POOLS_M,
+            d_target
+        )
+        if tops and bottoms:
+            return label, random.choice(tops), random.choice(bottoms)
+        return None
 
+    # ---- 2. 生成两套方案 ----
     plans = []
-    if bias_choice == "正常":
-        plans.append(make_plan(base_up, base_down, "精准匹配"))
-        plans.append(make_plan(base_up, base_down + 0.5, "微调±0.5"))
-    elif bias_choice == "怕冷":
-        plans.append(make_plan(base_up, base_down, "常规厚度"))
-        plans.append(make_plan(base_up + 1.0, base_down + 0.5, "加衣版"))
-    else:  # 怕热
-        plans.append(make_plan(base_up, base_down, "常规厚度"))
-        plans.append(make_plan(base_up - 1.0, base_down - 0.5, "减衣版"))
 
-    st.header("推荐穿搭方案")
-    for plan in filter(None, plans):
-        tag, top, bot = plan
-        st.subheader(tag)
-        st.markdown("**上身：**")
-        for cat, name, w in top:
-            st.markdown(f"- {name}（{cat} · {w}）")
-        st.markdown("**下身：**")
-        for cat, name, w in bot:
-            st.markdown(f"- {name}（{cat} · {w}）")
+    # 方案 ①：精准匹配
+    plans.append(make_plan(up_base, dn_base, "精准匹配"))
+
+    # 方案 ②：随机微调 ±0.5
+    shift = random.choice((0.5, -0.5))
+    plans.append(make_plan(clamp(up_base + shift),
+                           clamp(dn_base + shift),
+                           f"微调 {shift:+.1f}"))
+
+    # 根据体感偏好替换第二方案
+    if bias_choice == "怕冷":
+        plans[-1] = make_plan(up_base + up_delta,
+                              dn_base + dn_delta,
+                              "加衣版")
+    elif bias_choice == "怕热":
+        plans[-1] = make_plan(clamp(up_base + up_delta),
+                              clamp(dn_base + dn_delta),
+                              "减衣版")
+
+    # ---- 3. 展示 ----
+    valid = list(filter(None, plans))
+    if not valid:
+        st.warning("未找到符合权重的搭配，请调整温度或偏好再试～")
+    else:
+        st.header("推荐穿搭方案")
+        for tag, top, bot in valid:
+            st.subheader(tag)
+            st.markdown("**上身：**")
+            for cat, name, w in top:
+                st.markdown(f"- {name}（{cat} · {w}）")
+            st.markdown("**下身：**")
+            for cat, name, w in bot:
+                st.markdown(f"- {name}（{cat} · {w}）")
